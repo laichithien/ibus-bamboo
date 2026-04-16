@@ -35,6 +35,12 @@ const BACKSPACE_INTERVAL = 0
 const AdaptiveCommitCooldown = 5 * 1000 * 1000
 const AdaptiveCommitBackspaceDelay = 2 * time.Millisecond
 
+func (e *IBusBambooEngine) logAdaptiveChromium(format string, args ...interface{}) {
+	if e.checkInputMode(config.AdaptiveCommitIM) && e.inChromiumLikeBrowser() {
+		log.Printf("[adaptive-chromium] "+format, args...)
+	}
+}
+
 func (e *IBusBambooEngine) bsProcessKeyEvent(keyVal uint32, keyCode uint32, state uint32) (bool, *dbus.Error) {
 	if isMovementKey(keyVal) {
 		e.preeditor.Reset()
@@ -189,6 +195,7 @@ func (e *IBusBambooEngine) shouldAppendDeadKey(newText, oldText string) bool {
 
 func (e *IBusBambooEngine) updatePreviousText(oldText, newText string) {
 	offsetRunes, nBackSpace := e.getOffsetRunes(newText, oldText)
+	e.logAdaptiveChromium("updatePreviousText old=%q new=%q offsetRunes=%q nBackspace=%d", oldText, newText, string(offsetRunes), nBackSpace)
 	if nBackSpace > 0 {
 		e.SendBackSpace(nBackSpace)
 	}
@@ -198,6 +205,7 @@ func (e *IBusBambooEngine) updatePreviousText(oldText, newText string) {
 
 func (e *IBusBambooEngine) updatePreviousTextInBatch(oldText, newText string, isWordBreakRune bool) {
 	offsetRunes, nBackSpace := e.getOffsetRunes(newText, oldText)
+	e.logAdaptiveChromium("updatePreviousTextInBatch old=%q new=%q offsetRunes=%q nBackspace=%d wordBreak=%v queue=%d", oldText, newText, string(offsetRunes), nBackSpace, isWordBreakRune, len(keyPressChan))
 	if nBackSpace > 0 {
 		e.SendBackSpace(nBackSpace)
 	}
@@ -244,6 +252,7 @@ func (e *IBusBambooEngine) batchCommit(oldText string, newText string, nBackSpac
 		return
 	}
 	patchedRunes, patchedBackSpace := e.getOffsetRunes(newText, oldText)
+	e.logAdaptiveChromium("batchCommit old=%q new=%q patched=%q patchedBackspace=%d initialBackspace=%d wordBreak=%v", oldText, newText, string(patchedRunes), patchedBackSpace, nBackSpace, isWordBreakRune)
 	if isWordBreakRune {
 		e.bsCommitText(patchedRunes)
 		return
@@ -285,6 +294,7 @@ func (e *IBusBambooEngine) SendBackSpace(n int) {
 	if delta > 0 {
 		time.Sleep(time.Duration(delta) * time.Nanosecond)
 	}
+	e.logAdaptiveChromium("SendBackSpace n=%d cooldownNs=%d deltaNs=%d lastCommit=%d", n, cooldown, delta, e.lastCommitText)
 	if e.checkInputMode(config.XTestFakeKeyEventIM) {
 		e.setFakeBackspace(int32(n))
 		var sleep = func() {
@@ -313,6 +323,19 @@ func (e *IBusBambooEngine) SendBackSpace(n int) {
 		}
 		time.Sleep(time.Duration(n) * (20 + BACKSPACE_INTERVAL) * time.Millisecond)
 	} else if e.checkInputMode(config.AdaptiveCommitIM) {
+		if e.inChromiumLikeBrowser() {
+			log.Printf("Clearing Chromium suggestion via Escape before replace")
+			e.ForwardKeyEvent(IBusEscape, XkEscape, 0)
+			e.ForwardKeyEvent(IBusEscape, XkEscape, IBusReleaseMask)
+			time.Sleep(AdaptiveCommitBackspaceDelay)
+			log.Printf("Sendding %d Shift+Left via adaptive Chromium path\n", n)
+			for i := 0; i < n; i++ {
+				e.ForwardKeyEvent(IBusLeft, XkLeft-8, IBusShiftMask)
+				e.ForwardKeyEvent(IBusLeft, XkLeft-8, IBusReleaseMask)
+			}
+			time.Sleep(AdaptiveCommitBackspaceDelay)
+			return
+		}
 		log.Printf("Sendding %d backspace via adaptive ForwardKeyEvent\n", n)
 		for i := 0; i < n; i++ {
 			e.ForwardKeyEvent(IBusBackSpace, XkBackspace-8, 0)
@@ -351,6 +374,7 @@ func (e *IBusBambooEngine) bsCommitText(rs []rune) {
 		return
 	}
 	if e.checkInputMode(config.ForwardAsCommitIM) || e.checkInputMode(config.AdaptiveCommitIM) {
+		e.logAdaptiveChromium("bsCommitText text=%q", string(rs))
 		log.Println("Direct commit", string(rs))
 		e.commitText(string(rs))
 		return

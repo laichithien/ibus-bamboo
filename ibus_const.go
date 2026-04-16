@@ -56,6 +56,7 @@ const (
 const (
 	XkBackspace = 0x16
 	XkLeft      = 0x71
+	XkEscape    = 0x01
 )
 const (
 	IBusTab             = 0xff09
