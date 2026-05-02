@@ -216,7 +216,8 @@ func (e *IBusBambooEngine) updatePreviousTextInBatch(oldText, newText string, is
 	}
 	// isDirty means containing runes that are not committed
 	var isDirty = false
-	for i := 0; i < len(keyPressChan); i++ {
+	queuedKeyCount := len(keyPressChan)
+	for i := 0; i < queuedKeyCount; i++ {
 		var keyEvents = <-keyPressChan
 		var keyVal, keyCode, state = keyEvents[0], keyEvents[1], keyEvents[2]
 		isValidKey := isValidState(state) && e.isValidKeyVal(keyVal)

@@ -358,6 +358,31 @@ func TestAdaptiveCommitEngine(t *testing.T) {
 	}
 }
 
+func TestBatchCommitDrainsQueuedKeyPresses(t *testing.T) {
+	for len(keyPressChan) > 0 {
+		<-keyPressChan
+	}
+
+	fe := NewFakeEngine()
+	cfg := config.DefaultCfg()
+	cfg.DefaultInputMode = config.SurroundingTextIM
+	inputMethod := bamboo.ParseInputMethod(cfg.InputMethodDefinitions, cfg.InputMethod)
+	e := NewIbusBambooEngine("test", &cfg, fe, bamboo.NewEngine(inputMethod, cfg.Flags))
+
+	keyPressChan <- asciiToKeys('b')
+	keyPressChan <- asciiToKeys('c')
+
+	if processed := e.keyPressHandler('a', 'a', 0); !processed {
+		t.Fatal("expected first queued keypress to be processed")
+	}
+	if fe.commitText != "abc" {
+		t.Fatalf("expected queued keypresses to be committed in order, got %q", fe.commitText)
+	}
+	if len(keyPressChan) != 0 {
+		t.Fatalf("expected keypress queue to be drained, remaining=%d", len(keyPressChan))
+	}
+}
+
 func TestShouldAppendDeadKeyInChromium(t *testing.T) {
 	cfg := config.DefaultCfg()
 	inputMethod := bamboo.ParseInputMethod(cfg.InputMethodDefinitions, cfg.InputMethod)
