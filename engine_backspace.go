@@ -35,6 +35,8 @@ const BACKSPACE_INTERVAL = 0
 const AdaptiveCommitCooldown = 5 * 1000 * 1000
 const AdaptiveCommitBackspaceDelay = 2 * time.Millisecond
 
+var queuedKeyBatchDelay = 10 * time.Millisecond
+
 func (e *IBusBambooEngine) logAdaptiveChromium(format string, args ...interface{}) {
 	if e.checkInputMode(config.AdaptiveCommitIM) && e.inChromiumLikeBrowser() {
 		log.Printf("[adaptive-chromium] "+format, args...)
@@ -216,9 +218,25 @@ func (e *IBusBambooEngine) updatePreviousTextInBatch(oldText, newText string, is
 	}
 	// isDirty means containing runes that are not committed
 	var isDirty = false
-	queuedKeyCount := len(keyPressChan)
-	for i := 0; i < queuedKeyCount; i++ {
-		var keyEvents = <-keyPressChan
+processQueuedKeys:
+	for {
+		var keyEvents [3]uint32
+		select {
+		case keyEvents = <-keyPressChan:
+		default:
+			if queuedKeyBatchDelay <= 0 {
+				break processQueuedKeys
+			}
+			timer := time.NewTimer(queuedKeyBatchDelay)
+			select {
+			case keyEvents = <-keyPressChan:
+				if !timer.Stop() {
+					<-timer.C
+				}
+			case <-timer.C:
+				break processQueuedKeys
+			}
+		}
 		var keyVal, keyCode, state = keyEvents[0], keyEvents[1], keyEvents[2]
 		isValidKey := isValidState(state) && e.isValidKeyVal(keyVal)
 		if isValidKey {

@@ -3,6 +3,7 @@ package main
 import (
 	"ibus-bamboo/config"
 	"testing"
+	"time"
 
 	"github.com/BambooEngine/bamboo-core"
 )
@@ -377,6 +378,49 @@ func TestBatchCommitDrainsQueuedKeyPresses(t *testing.T) {
 	}
 	if fe.commitText != "abc" {
 		t.Fatalf("expected queued keypresses to be committed in order, got %q", fe.commitText)
+	}
+	if len(keyPressChan) != 0 {
+		t.Fatalf("expected keypress queue to be drained, remaining=%d", len(keyPressChan))
+	}
+}
+
+func TestBatchCommitWaitsForFastTrailingWordBreak(t *testing.T) {
+	for len(keyPressChan) > 0 {
+		<-keyPressChan
+	}
+	oldQueuedKeyBatchDelay := queuedKeyBatchDelay
+	queuedKeyBatchDelay = 100 * time.Millisecond
+	defer func() {
+		queuedKeyBatchDelay = oldQueuedKeyBatchDelay
+		for len(keyPressChan) > 0 {
+			<-keyPressChan
+		}
+	}()
+
+	fe := NewFakeEngine()
+	cfg := config.DefaultCfg()
+	cfg.DefaultInputMode = config.SurroundingTextIM
+	inputMethod := bamboo.ParseInputMethod(cfg.InputMethodDefinitions, cfg.InputMethod)
+	e := NewIbusBambooEngine("test", &cfg, fe, bamboo.NewEngine(inputMethod, cfg.Flags))
+
+	for _, c := range "nguoi" {
+		e.keyPressHandler(uint32(c), uint32(c), 0)
+	}
+
+	keyPressChan <- asciiToKeys('f')
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(45 * time.Millisecond)
+		keyPressChan <- asciiToKeys(' ')
+		close(done)
+	}()
+
+	if processed := e.keyPressHandler('w', 'w', 0); !processed {
+		t.Fatal("expected w keypress to be processed")
+	}
+	<-done
+	if fe.commitText != "người " {
+		t.Fatalf("expected delayed word break to be batched, got %q", fe.commitText)
 	}
 	if len(keyPressChan) != 0 {
 		t.Fatalf("expected keypress queue to be drained, remaining=%d", len(keyPressChan))
